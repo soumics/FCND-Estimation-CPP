@@ -93,13 +93,25 @@ void QuadEstimatorEKF::UpdateFromIMU(V3F accel, V3F gyro)
   // (replace the code below)
   // make sure you comment it out when you add your own code -- otherwise e.g. you might integrate yaw twice
 
-  float predictedPitch = pitchEst + dtIMU * gyro.y;
+  /*float predictedPitch = pitchEst + dtIMU * gyro.y;
   float predictedRoll = rollEst + dtIMU * gyro.x;
   ekfState(6) = ekfState(6) + dtIMU * gyro.z;	// yaw
 
   // normalize yaw to -pi .. pi
   if (ekfState(6) > F_PI) ekfState(6) -= 2.f*F_PI;
+  if (ekfState(6) < -F_PI) ekfState(6) += 2.f*F_PI;*/
+  
+  
+  Quaternion<float> attitude = Quaternion<float>::FromEuler123_RPY(rollEst, pitchEst, ekfState(6));
+  attitude.IntegrateBodyRate(gyro, dtIMU);
+  float predictedRoll = attitude.Roll();
+  float predictedPitch = attitude.Pitch();
+  ekfState(6) = attitude.Yaw();
+  // normalize yaw to -pi .. pi
+  if (ekfState(6) > F_PI) ekfState(6) -= 2.f*F_PI;
   if (ekfState(6) < -F_PI) ekfState(6) += 2.f*F_PI;
+  
+  
 
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
@@ -163,6 +175,15 @@ VectorXf QuadEstimatorEKF::PredictState(VectorXf curState, float dt, V3F accel, 
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
 
+  predictedState(0) += curState(3) * dt;
+  predictedState(1) += curState(4) * dt;
+  predictedState(2) += curState(5) * dt;
+  const V3F acc_inertial = attitude.Rotate_BtoI(accel) - V3F(0.0F, 0.0F, static_cast<float>(CONST_GRAVITY));
+  predictedState(3) += acc_inertial.x * dt;
+  predictedState(4) += acc_inertial.y * dt;
+  predictedState(5) += acc_inertial.z * dt;
+  
+
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
   return predictedState;
@@ -189,6 +210,21 @@ MatrixXf QuadEstimatorEKF::GetRbgPrime(float roll, float pitch, float yaw)
 
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
+
+  float theta = pitch;
+  float phi = roll;
+  float psi = yaw;
+  RbgPrime(0, 0) = (-(cos(theta) * sin(psi)));
+  RbgPrime(0, 1) = (-(sin(phi) * sin(theta) * sin(psi)) - (cos(phi) * cos(psi)));
+  RbgPrime(0, 2) = (-(cos(phi) * sin(theta) * sin(psi)) + (sin(phi) * cos(psi)));
+  RbgPrime(1, 0) = (cos(theta) * cos(psi));
+  RbgPrime(1, 1) = (sin(phi) * sin(theta) * cos(psi)) - (cos(phi) * sin(psi));
+  RbgPrime(1, 2) = (cos(phi) * sin(theta) * cos(psi)) + (sin(phi) * sin(psi));
+  RbgPrime(2, 0) = 0;
+  RbgPrime(2, 1) = 0;
+  RbgPrime(2, 2) = 0;
+  
+  
 
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
@@ -236,6 +272,16 @@ void QuadEstimatorEKF::Predict(float dt, V3F accel, V3F gyro)
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
 
+  gPrime(0, 3) = dt;
+  gPrime(1, 4) = dt;
+  gPrime(2, 5) = dt;
+  gPrime(3, 6) = (RbgPrime(0) * accel).sum() * dt;
+  gPrime(4, 6) = (RbgPrime(1) * accel).sum() * dt;
+  gPrime(5, 6) = (RbgPrime(2) * accel).sum() * dt;
+  ekfCov = gPrime * ekfCov * gPrime.transpose() + Q;
+  
+  
+
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
   ekfState = newState;
@@ -260,6 +306,14 @@ void QuadEstimatorEKF::UpdateFromGPS(V3F pos, V3F vel)
   //  - this is a very simple update
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
+  
+  for (int i = 0; i < 6; i++)
+  {
+    zFromX(i) = ekfState(i);
+    hPrime(i, i) = 1;
+  }
+
+
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
   Update(z, hPrime, R_GPS, zFromX);
@@ -281,6 +335,22 @@ void QuadEstimatorEKF::UpdateFromMag(float magYaw)
   //  - The magnetomer measurement covariance is available in member variable R_Mag
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
+
+  //Getting yaw estimate
+  zFromX(0) = ekfState(6);
+  // normalizing it,  measured & estimated yaw to -pi .. pi
+  float yawDiff = z(0) - zFromX(0);
+  if (yawDiff > F_PI)
+   {
+     zFromX(0) += 2.f*F_PI;
+   }
+  else if (yawDiff < -F_PI)
+   {
+    zFromX(0) -= 2.f*F_PI;
+   }
+  hPrime(0, 6) = 1;
+ 
+  
 
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
